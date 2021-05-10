@@ -1,11 +1,28 @@
 import os
 from operator import itemgetter
 
-import keras.backend as K
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 import tensorflow as tf
+
+
+def img_shift(array, shift, axis):
+    """ shifts an image along the indicated axis.
+    # Arguments
+        array: array-like image to be shifted
+        shift: int, number of pixels to shift
+        axis: 0, 1 or 2, the axis to shift
+    # Returns
+        the shifted array.
+    """
+    array = np.array(array, dtype=bool)
+    array_neg_shift = np.roll(array, -shift, axis=axis)
+    array_pos_shift = np.roll(array, shift, axis=axis)
+    neg_mask = array & array_neg_shift
+    pos_mask = array & array_pos_shift
+
+    return neg_mask + pos_mask
 
 
 def sort_by_atlas_number(list_imgs, sort=True):
@@ -57,6 +74,10 @@ def get_lesion_activity(list_mask_bl, list_mask_fu):
         mask_bl_data = list_mask_bl[i].get_fdata()
         mask_fu_data = list_mask_fu[i].get_fdata()
         la = (mask_fu_data - mask_bl_data) > 0
+        shift_x = img_shift(array=la, shift=1, axis=0)
+        shift_y = img_shift(array=la, shift=1, axis=1)
+        shift_z = img_shift(array=la, shift=1, axis=2)
+        la = shift_x * shift_y * shift_z
         lesion_activity.append(la)
 
     return lesion_activity
@@ -111,9 +132,6 @@ def load_data(path, img_type):
         return flair_bl, flair_fu, lesion_activity
 
 
-
-
-
 @tf.function
 def crop(atlas_number, seed_ini, x_size=128, y_size=128, z_size=128):
     """ Random crop to size (128, 128, 128).
@@ -161,13 +179,14 @@ def crop_preprocess(array, is_nib=True, x_crop=27, y_crop=45, z_crop=27):
         for i in range(len(array)):
             img_data = array[i].get_fdata()
             if img_data.max() > 256:
-                print('Intensity over 256, something wrong in position {}'.format(i))
+                mask256 = img_data < 257
+                img_data = img_data * mask256
             img_data = img_data.astype('float32')
-            mean = np.mean(img_data)
-            std = np.std(img_data)
+            # mean = np.mean(img_data)
+            # std = np.std(img_data)
             img_data /= img_data.max()  # intensity normalization
-            img_data -= mean  # data centering
-            img_data /= std  # data normalization
+            # img_data -= mean  # data centering
+            # img_data /= std  # data normalization
 
             cropped_array.append(np.array(img_data[x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop]))
         return np.expand_dims(cropped_array, axis=4)
@@ -178,3 +197,18 @@ def crop_preprocess(array, is_nib=True, x_crop=27, y_crop=45, z_crop=27):
 
 
 # The original size of the images is (182, 218, 182).
+'''
+data_path = 'ESTUDIO_UOC/'
+train_data_path = os.path.join(data_path, 'Train')
+test_data_path = os.path.join(data_path, 'Test')
+
+flair_bl_train, flair_fu_train, lesion_activity_train = load_data(train_data_path, img_type='FLAIR')
+flair_bl_train = crop_preprocess(flair_bl_train)
+flair_fu_train = crop_preprocess(flair_fu_train)
+lesion_activity_train = crop_preprocess(lesion_activity_train, is_nib=False)
+
+for i in range(len(lesion_activity_train)):
+    show_slices([flair_bl_train[i][:, :, 64, 0], flair_fu_train[i][:, :, 64, 0],
+                 lesion_activity_train[i][:, :, 64, 0]])
+    plt.savefig('slices_' + str(i+1) + '.png')
+'''
