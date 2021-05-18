@@ -1,10 +1,10 @@
 import os
+import random
 from operator import itemgetter
 
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
-import tensorflow as tf
 
 
 def img_shift(array, shift, axis):
@@ -25,6 +25,33 @@ def img_shift(array, shift, axis):
     return neg_mask + pos_mask
 
 
+def preprocess_nib(nib_img, is_mask=False):
+    """ Preprocess nibabel images.
+    # Arguments
+        nib_img: nibabel image to be processed
+        is_mask: default False, whether the image is a mask or not
+    # Returns
+        A new preprocessed numpy array expanded to indicate the grayscale channel.
+    """
+    if not is_mask:
+        img_data = nib_img.get_fdata()
+        if img_data.max() > 256:
+            mask256 = img_data < 257
+            img_data = img_data * mask256
+        img_data = img_data.astype('float32')
+        # mean = np.mean(img_data)
+        # std = np.std(img_data)
+        img_data /= img_data.max()  # intensity normalization
+        # img_data -= mean  # data centering
+        # img_data /= std  # data normalization
+
+        return np.expand_dims(img_data, axis=3)
+    else:
+        img_data = np.array(nib_img.get_fdata(), dtype='float32')
+
+        return np.expand_dims(img_data, axis=3)
+
+
 def sort_by_atlas_number(list_imgs, sort=True):
     """ Return a list of images sorted by atlas number.
     # Parameters
@@ -36,7 +63,14 @@ def sort_by_atlas_number(list_imgs, sort=True):
     """
     numbers = []
     for i in range(len(list_imgs)):
-        number = list_imgs[i][5:7]
+        if list_imgs[i][12:17] == 'Train':
+            ini = 23
+            end = 25
+        else:
+            ini = 22
+            end = 24
+
+        number = list_imgs[i][ini:end]
         if number[1] == '_':
             number = number[0]
         numbers.append(int(number))
@@ -71,9 +105,7 @@ def get_lesion_activity(list_mask_bl, list_mask_fu):
     """
     lesion_activity = []
     for i in range(len(list_mask_bl)):
-        mask_bl_data = list_mask_bl[i].get_fdata()
-        mask_fu_data = list_mask_fu[i].get_fdata()
-        la = (mask_fu_data - mask_bl_data) > 0
+        la = (list_mask_fu[i] - list_mask_bl[i]) > 0
         shift_x = img_shift(array=la, shift=1, axis=0)
         shift_y = img_shift(array=la, shift=1, axis=1)
         shift_z = img_shift(array=la, shift=1, axis=2)
@@ -83,132 +115,141 @@ def get_lesion_activity(list_mask_bl, list_mask_fu):
     return lesion_activity
 
 
-def load_data(path, img_type):
-    """ Process of loading data from data path.
-    # Arguments
+def get_filenames(path, img_type):
+    """ Gets the filenames of the images.
+     # Arguments
         path: str, directory where the images are located
-        img_type: 'T1' or 'FLAIR', type of image
+        img_type: 'T1', 'FLAIR' or 'mask', type of image
     # Returns
-        3 lists containing the baseline img_type, follow-up img_type
-         and lesion activity respectively.
+        2 lists containing the baseline img_type and follow-up img_type filenames.
     """
     files = os.listdir(path)
-
-    imgs_t1_bl = [img for img in files if '_00_T1' in img]
-    imgs_t1_fu = [img for img in files if '_01_T1' in img]
-    imgs_flair_bl = [img for img in files if '_00_FL' in img]
-    imgs_flair_fu = [img for img in files if '_01_FL' in img]
-    imgs_mask_bl = [img for img in files if '_00_lesion' in img]
-    imgs_mask_fu = [img for img in files if '_01_lesion' in img]
-
-    imgs = [imgs_t1_bl,
-            imgs_t1_fu,
-            imgs_flair_bl,
-            imgs_flair_fu,
-            imgs_mask_bl,
-            imgs_mask_fu]
-
-    imgs = [sort_by_atlas_number(i) for i in imgs]
-
-    t1_bl = []
-    t1_fu = []
-    flair_bl = []
-    flair_fu = []
-    mask_bl = []
-    mask_fu = []
-
-    imgs_out = [t1_bl, t1_fu, flair_bl, flair_fu, mask_bl, mask_fu]
-    j = 0
-    for cat in imgs:
-        for i in range(len(cat)):
-            imgs_out[j].append(nib.load(os.path.join(path, cat[i])))
-        j += 1
-
-    lesion_activity = get_lesion_activity(mask_bl, mask_fu)
-
     if img_type == 'T1':
-        return t1_bl, t1_fu, lesion_activity
+        bl_files = sort_by_atlas_number([os.path.join(path, img) for img in files if '_00_T1' in img])
+        fu_files = sort_by_atlas_number([os.path.join(path, img) for img in files if '_01_T1' in img])
+        return bl_files, fu_files
+
     if img_type == 'FLAIR':
-        return flair_bl, flair_fu, lesion_activity
+        bl_files = sort_by_atlas_number([os.path.join(path, img) for img in files if '_00_FL' in img])
+        fu_files = sort_by_atlas_number([os.path.join(path, img) for img in files if '_01_FL' in img])
+        return bl_files, fu_files
+
+    if img_type == 'mask':
+        lesion_act = sort_by_atlas_number([os.path.join(path, img) for img in files if '_lesion_activity' in img])
+        return lesion_act
 
 
-@tf.function
-def crop(atlas_number, seed_ini, x_size=128, y_size=128, z_size=128):
-    """ Random crop to size (128, 128, 128).
+def load(filenames):
+    """ Process of loading data from data path.
     # Arguments
-        i: Atlas number
-        seed_ini : int, random initializer
-        x_size: default 128, size of the cropped x axis
-        y_size: default 128, size of the cropped y axis
-        z_size: default 128, size of the cropped z axis
+        filename: filename corresponding to the image
     # Returns
-        5 cropped images for each atlas number: t1 baseline, t1 follow-up, flair baseline, flair follow-up
-        and lesion activity respectively.
+        loaded and preprocessed array of images.
     """
-    s_1 = tf.image.random_crop(t1_bl_train[atlas_number],
-                               seed=seed_ini,
-                               size=[x_size, y_size, z_size])
-    s_2 = tf.image.random_crop(t1_fu_train[atlas_number],
-                               seed=seed_ini,
-                               size=[x_size, y_size, z_size])
-    s_3 = tf.image.random_crop(flair_bl_train[atlas_number],
-                               seed=seed_ini,
-                               size=[x_size, y_size, z_size])
-    s_4 = tf.image.random_crop(flair_fu_train[atlas_number],
-                               seed=seed_ini,
-                               size=[x_size, y_size, z_size])
-    s_5 = tf.image.random_crop(lesion_activity_train[atlas_number],
-                               seed=seed_ini,
-                               size=[x_size, y_size, z_size])
-    return s_1, s_2, s_3, s_4, s_5
+    bl, fu = filenames
+    nib_image_bl = nib.load(bl.numpy().decode('utf-8'))
+    nib_image_fu = nib.load(fu.numpy().decode('utf-8'))
+    bl_preprocessed = preprocess_nib(nib_image_bl, is_mask=False)
+    fu_preprocessed = preprocess_nib(nib_image_fu, is_mask=False)
+
+    return bl_preprocessed, fu_preprocessed
 
 
-def crop_preprocess(array, is_nib=True, x_crop=27, y_crop=45, z_crop=27):
-    """ Preprocess nibabel images and crops symmetrically along the x, y and z axis.
+def load_mask(filename):
+    """ Process of loading data from data path.
     # Arguments
-        array: array to be cropped
-        is_nib: default True, whether the array is a nibabel object or not
-        x_crop: default 27, size of the crop at the beginning and the end of the x axis of the array
-        y_crop: default 45, size of the crop at the beginning and the end of the y axis of the array
-        z_crop: default 27, size of the crop at the beginning and the end of the z axis of the array
+        filename: filename corresponding to the image
     # Returns
-        A new preprocessed numpy array cropped symmetrically and expanded to indicate the grayscale channel.
+        loaded and preprocessed array of images.
     """
-    if is_nib:
-        cropped_array = []
-        for i in range(len(array)):
-            img_data = array[i].get_fdata()
-            if img_data.max() > 256:
-                mask256 = img_data < 257
-                img_data = img_data * mask256
-            img_data = img_data.astype('float32')
-            # mean = np.mean(img_data)
-            # std = np.std(img_data)
-            img_data /= img_data.max()  # intensity normalization
-            # img_data -= mean  # data centering
-            # img_data /= std  # data normalization
+    nib_image = nib.load(filename.numpy().decode('utf-8'))
 
-            cropped_array.append(np.array(img_data[x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop]))
-        return np.expand_dims(cropped_array, axis=4)
-    else:
-        cropped_array = np.array([array[i][x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop]
-                                  for i in range(len(array))], dtype='float32')
-        return np.expand_dims(cropped_array, axis=4)
+    return preprocess_nib(nib_image, is_mask=True)
+
+
+def random_crop_flip(images, mask, width=128, height=128, depth=128):
+    """ Random crops to (with, height, depth) and flips randomly along de x, y, and z axis.
+    # Arguments
+        images: tuple containing the baseline and follow-up images.
+        mask: array, contains the segmentation mask.
+        width: int, default 128, width of the cropped image.
+        height: int, default 128, height of the cropped image.
+        depth: int, default 128, depth of the cropped image.
+    # Returns
+        3 arrays (baseline image, follow-up image and segmentation mask) randomly cropped and flipped.
+    """
+    img_bl, img_fu = images
+    img_bl = img_bl.numpy()
+    img_fu = img_fu.numpy()
+    mask = mask.numpy()
+    x_rand = random.randint(0, img_bl.shape[1] - width)
+    y_rand = random.randint(0, img_bl.shape[0] - height)
+    z_rand = random.randint(0, img_bl.shape[2] - depth)
+    img_bl_f = img_bl[y_rand:y_rand + height, x_rand:x_rand + width, z_rand:z_rand + depth, :]
+    img_fu_f = img_fu[y_rand:y_rand + height, x_rand:x_rand + width, z_rand:z_rand + depth, :]
+    mask_f = mask[0, y_rand:y_rand + height, x_rand:x_rand + width, z_rand:z_rand + depth, :]
+    flip_x = random.choice([True, False])
+    flip_y = random.choice([True, False])
+    flip_z = random.choice([True, False])
+
+    if flip_x:
+        img_bl_f = np.flip(img_bl_f, axis=1)
+        img_fu_f = np.flip(img_fu_f, axis=1)
+        mask_f = np.flip(mask_f, axis=1)
+
+    if flip_y:
+        img_bl_f = np.flip(img_bl_f, axis=0)
+        img_fu_f = np.flip(img_fu_f, axis=0)
+        mask_f = np.flip(mask_f, axis=0)
+
+    if flip_z:
+        img_bl_f = np.flip(img_bl_f, axis=2)
+        img_fu_f = np.flip(img_fu_f, axis=2)
+        mask_f = np.flip(mask_f, axis=2)
+
+    return img_bl_f, img_fu_f, mask_f
+
+
+def central_crop(images, mask, x_crop=27, y_crop=45, z_crop=27):
+    """ crops symmetrically along the x, y and z axis.
+    # Arguments
+        images: tuple containing the baseline and follow-up images.
+        mask: array, contains the segmentation mask.
+        x_crop: int, default 27, size to crop at the beginning and end of the x axis.
+        y_crop: int, default 45, size to crop at the beginning and end of the y axis.
+        z_crop: int, default 27, size to crop at the beginning and end of the z axis.
+    # Returns
+        3 arrays (baseline image, follow-up image and segmentation mask) cropped symmetrically.
+    """
+    img_bl, img_fu = images
+    img_bl = img_bl.numpy()
+    img_fu = img_fu.numpy()
+    mask = mask.numpy()
+
+    img_bl_f = img_bl[x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop, :]
+    img_fu_f = img_fu[x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop, :]
+    mask_f = mask[0, x_crop:-x_crop, y_crop:-y_crop, z_crop:-z_crop, :]
+
+    return img_bl_f, img_fu_f, mask_f
+
+
+def _set_shapes(img_bl, img_fu, mask):
+    """ Sets the shapes of the tensors inside tf.Dataset object.
+    # Arguments
+        image_bl: array, contains the baseline image.
+        image_fu: array, contains the follow-up image.
+        mask: array, contains the segmentation mask.
+    # Returns
+        A tuple containing the baseline and follow-up images, and the segmentation mask.
+    """
+    img_bl.set_shape([128, 128, 128, 1])
+    img_fu.set_shape([128, 128, 128, 1])
+    mask.set_shape([128, 128, 128, 1])
+
+    return (img_bl, img_fu), mask
 
 
 # The original size of the images is (182, 218, 182).
-'''
-data_path = 'ESTUDIO_UOC/'
-train_data_path = os.path.join(data_path, 'Train')
-test_data_path = os.path.join(data_path, 'Test')
 
-flair_bl_train, flair_fu_train, lesion_activity_train = load_data(train_data_path, img_type='FLAIR')
-flair_bl_train = crop_preprocess(flair_bl_train)
-flair_fu_train = crop_preprocess(flair_fu_train)
-lesion_activity_train = crop_preprocess(lesion_activity_train, is_nib=False)
 
-for i in range(len(lesion_activity_train)):
-    show_slices([flair_bl_train[i][:, :, 64, 0], flair_fu_train[i][:, :, 64, 0],
-                 lesion_activity_train[i][:, :, 64, 0]])
-    plt.savefig('slices_' + str(i+1) + '.png')
-'''
+
