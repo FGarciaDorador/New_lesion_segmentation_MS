@@ -1,7 +1,6 @@
 import tensorflow_addons as tfa
-from keras import layers
 from keras import Model
-import tensorflow as tf
+from keras import layers
 
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
@@ -252,12 +251,3 @@ def gessert_net(fusion_type):
     output = decoder(union)
 
     return Model(inputs=[input_bl, input_fu], outputs=output)
-
-
-'''
-model = gessert_net(fusion_type='stack')
-tf.keras.utils.plot_model(
-    model, to_file='gessert_net.png', show_shapes=True, show_dtype=False,
-    show_layer_names=True, rankdir='TB', expand_nested=False, dpi=96
-)
-'''

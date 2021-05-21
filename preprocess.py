@@ -39,11 +39,11 @@ def preprocess_nib(nib_img, is_mask=False):
             mask256 = img_data < 257
             img_data = img_data * mask256
         img_data = img_data.astype('float32')
-        # mean = np.mean(img_data)
-        # std = np.std(img_data)
+        mean = np.mean(img_data)
+        std = np.std(img_data)
         img_data /= img_data.max()  # intensity normalization
-        # img_data -= mean  # data centering
-        # img_data /= std  # data normalization
+        img_data -= mean  # data centering
+        img_data /= std  # data normalization
 
         return np.expand_dims(img_data, axis=3)
     else:
@@ -249,7 +249,26 @@ def _set_shapes(img_bl, img_fu, mask):
     return (img_bl, img_fu), mask
 
 
+def split_dataset(dataset, validation_data_fraction):
+    """
+    Splits a dataset of type tf.data.Dataset into a training and validation dataset using given ratio. Fractions are
+    rounded up to two decimal places.
+    @param dataset: the input dataset to split.
+    @param validation_data_fraction: the fraction of the validation data as a float between 0 and 1.
+    @return: a tuple of two tf.data.Datasets as (training, validation)
+    """
+
+    validation_data_percent = round(validation_data_fraction * 100)
+    if not (0 <= validation_data_percent <= 100):
+        raise ValueError("validation data fraction must be ∈ [0,1]")
+
+    dataset = dataset.enumerate()
+    train_dataset = dataset.filter(lambda f, data: f % 100 > validation_data_percent)
+    validation_dataset = dataset.filter(lambda f, data: f % 100 <= validation_data_percent)
+
+    # remove enumeration
+    train_dataset = train_dataset.map(lambda f, data: data)
+    validation_dataset = validation_dataset.map(lambda f, data: data)
+
+    return train_dataset, validation_dataset
 # The original size of the images is (182, 218, 182).
-
-
-
