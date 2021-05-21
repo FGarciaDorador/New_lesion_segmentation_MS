@@ -1,1 +1,1 @@
-# New_lesion_segmentation_MS
+# Multiple Sclerosis Lesion Activity Segmentation with Two-Path CNNs
