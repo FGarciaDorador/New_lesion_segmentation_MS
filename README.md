@@ -44,4 +44,4 @@ This script contains the functions to evaluate and predict, as well as some func
 If you want to use this model for training, I recommend creating a tf.data.Dataset object, preprocess it to shape (batch_size, 128, 128, 128, 1) and using the *train* function in **train.py** with this dataset.
 
 ### prediction
-For predictions of lesion activities, you can load your FLAIR images, preprocess them to arrays of shape (1, 128, 128, 128, 1) and use the *predict_and_save* functions in **results.py**. This model has only been tested with FLAIR images with the stack fusion strategy. You can find the file with the trained weights in this repository **weights_FLAIR_stack.h5**
+For predictions of lesion activities, you can load your FLAIR images, preprocess them to arrays of shape (1, 128, 128, 128, 1) and use the *predict_and_save* function in **results.py**. This model has only been tested with FLAIR images with the stack fusion strategy. You can find the file with the trained weights in this repository **weights_FLAIR_stack.h5**
