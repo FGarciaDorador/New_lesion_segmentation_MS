@@ -38,3 +38,10 @@ This script contains the creation of the tf.data.Dataset object for training and
 This script contains the functions to evaluate and predict, as well as some functions to preprocess the data adapted to arrays instead of tf.data.Dataset objects:
 +  **plot_loss_metrics**: plots the evolution of training per epoch.
 +  **predict_and_save**: predicts the lesion activity mask, saves it as .nii.gz and creates an image with a central slice comparing it with the gold standard.
+
+## Usage
+### training
+If you want to use this model for training, I recommend creating a tf.data.Dataset object, preprocess it to shape (batch_size, 128, 128, 128, 1) and using the *train* function in **train.py** with this dataset.
+
+### prediction
+For predictions of lesion activities, you can load your FLAIR images, preprocess them to arrays of shape (1, 128, 128, 128, 1) and use the *predict_and_save* functions in **results.py**. This model has only been tested with FLAIR images with the stack fusion strategy. You can find the file with the trained weights in this repository **weights_FLAIR_stack.h5**
